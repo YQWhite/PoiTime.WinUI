@@ -1,0 +1,54 @@
+<Window
+    x:Class="PoiTime.WinUI.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:tb="using:H.NotifyIcon"
+    Title="PoiTime! 舰娘报时">
+
+    <Grid>
+        <tb:TaskbarIcon x:Name="TrayIcon"
+                        IconSource="/Assets/favicon.ico"
+                        ToolTipText="PoiTime! 舰娘报时"
+                        DoubleClickCommand="{x:Bind ShowWindowCommand}">
+
+            <tb:TaskbarIcon.ContextFlyout>
+                <MenuFlyout>
+                    <MenuFlyoutItem Text="显示主界面" Command="{x:Bind ShowWindowCommand}">
+                        <MenuFlyoutItem.Icon>
+                            <FontIcon Glyph="&#xE700;"/>
+                        </MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem Text="测试当前时间报时" Command="{x:Bind TestVoiceCommand}"/>
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="完全退出" Command="{x:Bind ExitCommand}">
+                        <MenuFlyoutItem.Icon>
+                            <FontIcon Glyph="&#xE711;"/>
+                        </MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                </MenuFlyout>
+            </tb:TaskbarIcon.ContextFlyout>
+        </tb:TaskbarIcon>
+
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="20">
+            <PersonPicture ProfilePicture="/Assets/avatar.png" Height="100" Width="100"/>
+
+            <TextBlock Text="PoiTime!" FontSize="28" FontWeight="Bold" HorizontalAlignment="Center"/>
+            <TextBlock x:Name="CurrentShipTextBlock" Text="当前舰娘: 未加载" Foreground="Gray" HorizontalAlignment="Center"/>
+
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" 
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="20" Width="300" Margin="0,10,0,0">
+                <StackPanel Spacing="15">
+                    <ComboBox x:Name="ShipSelector" Header="切换舰娘" Width="260" SelectionChanged="ShipSelector_SelectionChanged">
+                    </ComboBox>
+
+                    <Button x:Name="TestVoiceButton" Content="测试当前语音" HorizontalAlignment="Stretch" Click="TestVoice_Click"/>
+
+                    <Button Content="下载新语音包" HorizontalAlignment="Stretch" Click="DownloadVoice_Click"/>
+
+                    <Button Content="隐藏到系统托盘" HorizontalAlignment="Stretch" Click="HideWindow_Click"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </Grid>
+</Window>
