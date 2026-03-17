@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "PoiTime.WinUI (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "PoiTime.WinUI (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
