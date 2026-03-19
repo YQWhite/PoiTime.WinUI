@@ -18,7 +18,6 @@
                             <FontIcon Glyph="&#xE700;"/>
                         </MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
-                    <MenuFlyoutItem Text="测试报时" Command="{x:Bind TestVoiceCommand}"/>
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="退出" Command="{x:Bind ExitCommand}">
                         <MenuFlyoutItem.Icon>
