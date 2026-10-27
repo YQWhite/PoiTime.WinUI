@@ -13,7 +13,7 @@
   <Identity
     Name="ac4ff9da-80b3-4bf3-ba16-508de0c0eb9b"
     Publisher="CN=shamirone"
-    Version="1.0.0.0" />
+    Version="1.2.1.0" />
 
   <mp:PhoneIdentity PhoneProductId="ac4ff9da-80b3-4bf3-ba16-508de0c0eb9b" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 

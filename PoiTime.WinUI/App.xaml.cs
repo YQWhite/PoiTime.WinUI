@@ -15,6 +15,7 @@ using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
+using PoiTime.WinUI.Services;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -34,7 +35,17 @@ namespace PoiTime.WinUI
         /// </summary>
         public App()
         {
-            InitializeComponent();
+            StartupDiagnostics.Initialize();
+            UnhandledException += (_, args) => StartupDiagnostics.Write("XAML.UnhandledException", args.Exception);
+            try
+            {
+                InitializeComponent();
+            }
+            catch (Exception exception)
+            {
+                StartupDiagnostics.ReportFatal(exception);
+                throw;
+            }
         }
 
         /// <summary>
@@ -43,8 +54,17 @@ namespace PoiTime.WinUI
         /// <param name="args">Details about the launch request and process.</param>
         protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
         {
-            _window = new MainWindow();
-            _window.Activate();
+            try
+            {
+                _window = new MainWindow();
+                _window.Activate();
+                StartupDiagnostics.Write("Main window activated");
+            }
+            catch (Exception exception)
+            {
+                StartupDiagnostics.ReportFatal(exception);
+                Exit();
+            }
         }
     }
 }

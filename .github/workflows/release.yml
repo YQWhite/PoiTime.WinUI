@@ -1,0 +1,94 @@
+name: Build and release portable ZIP
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Validate release version
+        id: version
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $properties = [xml](Get-Content Directory.Build.props -Raw)
+          $version = [string]$properties.Project.PropertyGroup.VersionPrefix
+          if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            throw 'VersionPrefix must use MAJOR.MINOR.PATCH.'
+          }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag must match the project version: v$version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Publish self-contained x64 ZIP
+        run: ./publish-portable.ps1 -OutputRoot "$env:GITHUB_WORKSPACE/artifacts"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-win-x64
+          path: |
+            artifacts/*.zip
+            artifacts/*.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: portable-win-x64
+          path: artifacts
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RELEASE_TAG" = "v$RELEASE_VERSION"
+          cat > release-notes.md <<'NOTES'
+          Windows x64 便携版：完整解压后运行 PoiTime.WinUI.exe。
+
+          已包含 .NET 8、Windows App SDK 1.8 和 Visual C++ 运行组件，无需单独安装运行库或 MSIX。
+          请保留文件夹内的全部 DLL、PRI、Assets 和 voices 文件。
+
+          建议使用 Windows 10 22H2 或 Windows 11。Windows N / 精简系统仍需恢复系统媒体功能。
+          附带 SHA256 校验文件。
+          NOTES
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" artifacts/*.zip artifacts/*.zip.sha256 --clobber
+          else
+            gh release create "$RELEASE_TAG" artifacts/*.zip artifacts/*.zip.sha256 \
+              --verify-tag --draft --title "PoiTime $RELEASE_TAG" \
+              --generate-notes --notes-file release-notes.md
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false --latest

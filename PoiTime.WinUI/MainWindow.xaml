@@ -252,8 +252,27 @@
                                                   OnContent="{x:Null}" OffContent="{x:Null}" 
                                                   Toggled="AutoStartToggle_Toggled"/>
                                 </Grid>
+                                <Grid x:Name="HighPriorityContainer" Visibility="Collapsed" Margin="0,16,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="4">
+                                        <TextBlock Text="高优先级启动" FontSize="16" FontWeight="Medium"/>
+                                        <TextBlock Text="开机优先启动本程序，加快启动速度"
+                                                   FontSize="12"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    </StackPanel>
+                                    <ToggleSwitch x:Name="HighPriorityToggle"
+                                                  Grid.Column="1"
+                                                  VerticalAlignment="Center"
+                                                  HorizontalAlignment="Right"
+                                                  MinWidth="0" Margin="0"
+                                                  OnContent="{x:Null}" OffContent="{x:Null}"
+                                                  Toggled="HighPriorityToggle_Toggled"/>
+                                </Grid>
 
-                                <MenuFlyoutSeparator Margin="0,4,0,4"/>
+                                <MenuFlyoutSeparator Margin="0,16,0,4"/>
 
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -352,7 +371,7 @@
 
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                     <TextBlock Text="PoiTime!" FontSize="18" FontWeight="SemiBold"/>
-                                    <TextBlock Text="1.0.0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    <TextBlock Text="{x:Bind AppVersion}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                                     <TextBlock Text="一款现代化的 Windows 桌面整点语音报时工具。让舰娘的声音陪伴你的每一小时。" 
                                                FontSize="13" Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                                 </StackPanel>

@@ -361,7 +361,14 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
-/PoiTime.WinUI/PoiTime.WinUI.csproj
-/README.md
-/.gitignore
-/.gitignore
+
+# Portable release output
+/artifacts/
+/release/
+/portable-release/
+/dist/
+/published-app.manifest
+/verification.json
+
+# Share the reproducible publish profiles.
+!PoiTime.WinUI/Properties/PublishProfiles/*.pubxml

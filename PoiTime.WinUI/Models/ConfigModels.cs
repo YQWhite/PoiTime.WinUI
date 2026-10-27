@@ -20,6 +20,7 @@ namespace PoiTime.WinUI.Models
         public int voiceCount { get; set; }
         public string? name { get; set; }
         public List<VoiceItem>? voices { get; set; }
-        public SpecialVoice? special { get; set; }
+
+        public List<SpecialVoice>? special { get; set; }
     }
 }
