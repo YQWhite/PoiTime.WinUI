@@ -111,7 +111,7 @@ $requiredFiles = @(
     'coreclr.dll', 'hostfxr.dll', 'hostpolicy.dll',
     'Microsoft.UI.Xaml.dll', 'Microsoft.WindowsAppRuntime.dll',
     'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
-    'PoiTime.WinUI.pri',
+    'PoiTime.WinUI.pri', 'startup-service\PoiTime.StartupService.exe',
     'Assets\favicon.ico', 'voices\144\config.json'
 )
 foreach ($file in $requiredFiles) {

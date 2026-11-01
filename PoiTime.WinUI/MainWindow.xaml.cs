@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.Win32;
 using PoiTime.WinUI.Models;
 using PoiTime.WinUI.Services;
@@ -13,6 +14,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -33,10 +35,6 @@ namespace PoiTime.WinUI
 {
     public sealed partial class MainWindow : Window
     {
-        // ======== 报时核心变量 ========
-        private Microsoft.UI.Xaml.DispatcherTimer? _hourlyTimer;
-        private int _lastChimeHour = -1;
-
         // ======== 主页分页变量 ========
         private List<VoicePackModel> _allInstalledPacks = new();
         private ObservableCollection<VoicePackModel> _pagedInstalledPacks = new();
@@ -53,6 +51,7 @@ namespace PoiTime.WinUI
 
         // ======== 下载队列机制 ========
         private bool _isDownloading = false;
+        private CancellationTokenSource? _toastCts;
         private Windows.Media.Playback.MediaPlayer? _previewPlayer;
         private VoicePackModel? _currentlyPreviewingPack;
         private Queue<(VoicePackModel Model, Button UIBtn)> _downloadQueue = new();
@@ -66,7 +65,8 @@ namespace PoiTime.WinUI
         private string _searchQuery = "";
 
         // ======== 订阅源配置 ========
-        private const string DefaultUpdateJsonUrl = "https://cs.thorgan.icu/update.json";
+        private const string DefaultUpdateJsonUrl = "https://shamirocloud.cn/update.json";
+        private const string LegacyDefaultUpdateJsonUrl = "https://cs.thorgan.icu/update.json";
         private const string UpdateJsonUrlSettingKey = "CustomUpdateJsonUrl";
         private const string MaxThreadsSettingKey = "MaxDownloadThreads";
         private const int DefaultMaxThreads = 5;
@@ -97,7 +97,10 @@ namespace PoiTime.WinUI
                 if (Microsoft.UI.Composition.SystemBackdrops.MicaController.IsSupported())
                     this.SystemBackdrop = new MicaBackdrop();
                 if (AppWindowTitleBar.IsCustomizationSupported())
+                {
                     this.ExtendsContentIntoTitleBar = true;
+                    this.SetTitleBar(AppTitleBar);
+                }
             }
             catch (Exception exception)
             {
@@ -114,7 +117,7 @@ namespace PoiTime.WinUI
 
             if (_appWindow != null)
             {
-                _appWindow.Resize(new SizeInt32(1000, 600));
+                _appWindow.Resize(new SizeInt32(1100, 680));
                 string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "favicon.ico");
                 try
                 {
@@ -133,6 +136,7 @@ namespace PoiTime.WinUI
                 }
             }
 
+            _audioService.LoadConfig(GetSettingFromDisk("ActiveVoicePackId") ?? "");
             _audioService.StartTimer();
             LoadAvailableShipsToUI();
         }
@@ -149,7 +153,7 @@ namespace PoiTime.WinUI
                     var settings = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
                     if (settings != null && settings.TryGetValue(UpdateJsonUrlSettingKey, out string? url) && !string.IsNullOrEmpty(url))
                     {
-                        return url;
+                        return url == LegacyDefaultUpdateJsonUrl ? DefaultUpdateJsonUrl : url;
                     }
                 }
             }
@@ -223,20 +227,44 @@ namespace PoiTime.WinUI
                 switch (tag)
                 {
                     case "Home":
-                        if (HomeContent != null) HomeContent.Visibility = Visibility.Visible;
+                        if (HomeContent != null) ShowPage(HomeContent);
                         break;
                     case "Download":
-                        if (DownloadContent != null) DownloadContent.Visibility = Visibility.Visible;
+                        if (DownloadContent != null) ShowPage(DownloadContent);
                         if (_allVoicePacks.Count == 0) LoadUpdateJsonFromServer();
                         break;
                     case "Settings":
-                        if (SettingsContent != null) SettingsContent.Visibility = Visibility.Visible;
+                        if (SettingsContent != null) ShowPage(SettingsContent);
                         break;
                     case "About":
-                        if (AboutContent != null) AboutContent.Visibility = Visibility.Visible;
+                        if (AboutContent != null) ShowPage(AboutContent);
                         break;
                 }
             }
+        }
+
+        private static void ShowPage(Grid page)
+        {
+            page.Visibility = Visibility.Visible;
+            page.Opacity = 0;
+
+            var transform = new TranslateTransform { Y = 14 };
+            page.RenderTransform = transform;
+
+            var duration = new Duration(TimeSpan.FromMilliseconds(240));
+            var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var fade = new DoubleAnimation { To = 1, Duration = duration, EasingFunction = easing };
+            var slide = new DoubleAnimation { To = 0, Duration = duration, EasingFunction = easing };
+
+            Storyboard.SetTarget(fade, page);
+            Storyboard.SetTargetProperty(fade, "Opacity");
+            Storyboard.SetTarget(slide, transform);
+            Storyboard.SetTargetProperty(slide, "Y");
+
+            var storyboard = new Storyboard();
+            storyboard.Children.Add(fade);
+            storyboard.Children.Add(slide);
+            storyboard.Begin();
         }
 
         private void LoadAvailableShipsToUI()
@@ -393,7 +421,8 @@ namespace PoiTime.WinUI
             }
         }
 
-        // 修复 CS8603 警告：将返回值改为 Style? 允许为空
+        public static Visibility GetEmptyVisibility(int count) => count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
         public static Style? GetPreviewButtonStyle(bool isPlaying)
         {
             if (Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread() == null) return null;
@@ -413,6 +442,7 @@ namespace PoiTime.WinUI
             if (sender is Button btn && btn.Tag is VoicePackModel model)
             {
                 SaveSettingToDisk("ActiveVoicePackId", model.Id);
+                _audioService.LoadConfig(model.Id);
 
                 foreach (var pack in _allInstalledPacks)
                 {
@@ -424,39 +454,10 @@ namespace PoiTime.WinUI
                     pack.IsActiveShip = (pack.Id == model.Id);
                 }
 
-                // 修复 CS8602 警告：添加空引用判断
-                if (ToastText != null) ToastText.Text = $"成功加载 {model.Name} 语音包";
-                if (ToastNotification != null) ToastNotification.Visibility = Visibility.Visible;
-
-                await Task.Delay(3000);
-
-                if (ToastNotification != null) ToastNotification.Visibility = Visibility.Collapsed;
+                await ShowToastAsync($"已切换到 {model.Name}，整点报时语音已就绪");
             }
         }
 
-        private void _hourlyTimer_Tick(object? sender, object e)
-        {
-            var now = DateTime.Now;
-            if (now.Hour != _lastChimeHour && now.Minute == 0)
-            {
-                _lastChimeHour = now.Hour;
-                PlayHourlyVoice(now.Hour);
-            }
-        }
-
-        private void PlayHourlyVoice(int hour)
-        {
-            string activeId = GetSettingFromDisk("ActiveVoicePackId") ?? "";
-            if (string.IsNullOrEmpty(activeId)) return;
-
-            string fileName = $"{activeId}-{hour:D2}00.mp3";
-            string voicePath = Path.Combine(AppContext.BaseDirectory, "voices", activeId, fileName);
-
-            if (File.Exists(voicePath))
-            {
-                _audioService.PlayVoice(voicePath);
-            }
-        }
         private void CheckAndPlaySpecialVoice()
         {
             string activeId = GetSettingFromDisk("ActiveVoicePackId") ?? "";
@@ -491,7 +492,7 @@ namespace PoiTime.WinUI
                                     await Task.Delay(2000);
                                     this.DispatcherQueue.TryEnqueue(() =>
                                     {
-                                        _audioService.PlayVoice(voicePath);
+                                        _audioService.PlayVoice(specialVoice.fileName);
                                         SaveSettingToDisk("LastSpecialVoiceDate", todayFull);
                                     });
                                 });
@@ -549,21 +550,6 @@ namespace PoiTime.WinUI
 
         // ================= 开机自启与提权逻辑 =================
 
-        private void CleanupOldRegistryAutoStart()
-        {
-            try
-            {
-                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
-                if (key != null)
-                {
-                    key.DeleteValue("PoiTime", false);
-                    key.DeleteValue("PoiTime.WinUI", false);
-                    key.DeleteValue("PoiTimeAutoStart", false);
-                }
-            }
-            catch { }
-        }
-
         private bool IsAdministrator()
         {
             var identity = WindowsIdentity.GetCurrent();
@@ -601,43 +587,36 @@ namespace PoiTime.WinUI
                 }
                 catch (Exception)
                 {
-                    if (ToastText != null) ToastText.Text = "已取消获取管理员权限，部分功能受限";
-                    if (ToastNotification != null) ToastNotification.Visibility = Visibility.Visible;
-                    await Task.Delay(3000);
-                    if (ToastNotification != null) ToastNotification.Visibility = Visibility.Collapsed;
+                    await ShowToastAsync("已取消管理员授权，部分功能暂不可用", true);
                     return false;
                 }
             }
             return false;
         }
 
-        private void RootGrid_Loaded(object sender, RoutedEventArgs e)
+        private async void RootGrid_Loaded(object sender, RoutedEventArgs e)
         {
-            InstalledVoicePackListView.ItemsSource = _installedVoicePacks;
             _isInitializing = true;
-            CleanupOldRegistryAutoStart();
+            InstalledVoicePackListView.ItemsSource = _installedVoicePacks;
+            AutoStartToggle.IsEnabled = false;
+            HighPriorityToggle.IsEnabled = false;
 
-            AutoStartToggle.IsOn = CheckAutoStartTask();
-            bool isHighPriority = GetSettingFromDisk("HighPriorityMode") == "true";
-            HighPriorityToggle.IsOn = isHighPriority;
-
-            HighPriorityContainer.Visibility = AutoStartToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
-            AutoStartToggle.IsEnabled = !HighPriorityToggle.IsOn;
-
-            if (isHighPriority)
+            bool hadLegacyAutoStart = await Task.Run(AutoStartManager.HasLegacyAutoStartTask);
+            await Task.Run(AutoStartManager.RemoveLegacyAutoStartTask);
+            var autoStartMode = await Task.Run(AutoStartManager.GetCurrentMode);
+            if (hadLegacyAutoStart && autoStartMode == AutoStartMode.Disabled)
             {
-                try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.High; } catch { }
+                AutoStartManager.SetStandardAutoStart(true);
+                autoStartMode = AutoStartMode.Standard;
             }
+            else if (autoStartMode == AutoStartMode.Standard)
+            {
+                AutoStartManager.SetStandardAutoStart(true);
+            }
+            UpdateAutoStartControls(autoStartMode);
 
             UpdateJsonUrlBox.Text = GetSavedUpdateJsonUrl();
             LoadAvailableShipsToUI();
-
-            _hourlyTimer = new DispatcherTimer();
-            _hourlyTimer.Interval = TimeSpan.FromSeconds(1);
-            _hourlyTimer.Tick += _hourlyTimer_Tick;
-            _hourlyTimer.Start();
-
-            _isInitializing = false;
 
             string? savedThreadsStr = GetSettingFromDisk(MaxThreadsSettingKey);
             int targetThreads = int.TryParse(savedThreadsStr, out int t) ? t : DefaultMaxThreads;
@@ -650,122 +629,146 @@ namespace PoiTime.WinUI
                     break;
                 }
             }
+            LoadUpdateJsonFromServer();
             CheckAndPlaySpecialVoice();
         }
 
-        private void AutoStartToggle_Toggled(object sender, RoutedEventArgs e)
+        private void UpdateAutoStartControls(AutoStartMode mode)
+        {
+            _isInitializing = true;
+            AutoStartToggle.IsOn = mode != AutoStartMode.Disabled;
+            HighPriorityToggle.IsOn = mode == AutoStartMode.HighPriority;
+            HighPriorityContainer.Visibility = mode == AutoStartMode.Disabled ? Visibility.Collapsed : Visibility.Visible;
+            AutoStartToggle.IsEnabled = mode != AutoStartMode.HighPriority;
+            HighPriorityToggle.IsEnabled = mode != AutoStartMode.Disabled;
+            _isInitializing = false;
+        }
+
+        private async void AutoStartToggle_Toggled(object sender, RoutedEventArgs e)
         {
             if (_isInitializing) return;
 
-            HighPriorityContainer.Visibility = AutoStartToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
-            SetAutoStartTask(AutoStartToggle.IsOn, HighPriorityToggle.IsOn);
+            bool enable = AutoStartToggle.IsOn;
+            AutoStartToggle.IsEnabled = false;
+            try
+            {
+                AutoStartManager.SetStandardAutoStart(enable);
+                UpdateAutoStartControls(enable ? AutoStartMode.Standard : AutoStartMode.Disabled);
+                await ShowToastAsync(enable ? "已开启开机自动启动" : "已关闭开机自动启动");
+            }
+            catch
+            {
+                UpdateAutoStartControls(AutoStartManager.GetCurrentMode());
+                await ShowToastAsync("启动设置保存失败，请检查系统权限", true);
+            }
         }
 
-        private void HighPriorityToggle_Toggled(object sender, RoutedEventArgs e)
+        private async void HighPriorityToggle_Toggled(object sender, RoutedEventArgs e)
         {
             if (_isInitializing) return;
 
-            bool isOn = HighPriorityToggle.IsOn;
-            SaveSettingToDisk("HighPriorityMode", isOn ? "true" : "false");
+            bool enable = HighPriorityToggle.IsOn;
+            AutoStartToggle.IsEnabled = false;
+            HighPriorityToggle.IsEnabled = false;
 
-            AutoStartToggle.IsEnabled = !isOn;
-            if (AutoStartToggle.IsOn)
+            if (!await ConfirmHighPriorityChangeAsync(enable))
             {
-                SetAutoStartTask(true, isOn);
+                UpdateAutoStartControls(AutoStartManager.GetCurrentMode());
+                return;
             }
 
-            try { Process.GetCurrentProcess().PriorityClass = isOn ? ProcessPriorityClass.High : ProcessPriorityClass.Normal; } catch { }
+            var result = await AutoStartManager.ConfigureHighPriorityAsync(enable);
+            if (result == ElevationResult.Success)
+            {
+                AutoStartManager.SetStandardAutoStart(!enable);
+                UpdateAutoStartControls(enable ? AutoStartMode.HighPriority : AutoStartMode.Standard);
+                await ShowToastAsync(enable ? "高优先级启动已启用，将在登录时更早运行" : "已切换为普通开机启动");
+                return;
+            }
+
+            UpdateAutoStartControls(AutoStartManager.GetCurrentMode());
+            string message = result switch
+            {
+                ElevationResult.Cancelled => "已取消管理员授权，启动方式未更改",
+                ElevationResult.MissingHelper => "未找到启动服务组件，请完整解压程序后再试",
+                _ => "启动服务配置失败，请检查安全软件拦截后重试"
+            };
+            await ShowToastAsync(message, result != ElevationResult.Cancelled);
         }
 
-        private bool CheckAutoStartTask()
+        private async Task<bool> ConfirmHighPriorityChangeAsync(bool enable)
         {
-            try
+            var content = new StackPanel { Spacing = 18 };
+            content.Children.Add(new Border
             {
-                var process = Process.Start(new ProcessStartInfo
+                Width = 52,
+                Height = 52,
+                CornerRadius = new CornerRadius(16),
+                Background = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"],
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Child = new FontIcon
                 {
-                    FileName = "schtasks.exe",
-                    Arguments = "/query /tn \"PoiTimeAutoStart\"",
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true
-                });
-                process?.WaitForExit();
-                return process?.ExitCode == 0;
-            }
-            catch { return false; }
+                    Glyph = "\uE72E",
+                    FontSize = 25,
+                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = enable
+                    ? "PoiTime 将安装一个 Windows 启动服务，在每次登录时更早唤醒报时程序。"
+                    : "关闭高优先级需要移除 Windows 启动服务，并恢复为普通开机启动。",
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 14,
+                LineHeight = 23
+            });
+            content.Children.Add(new Border
+            {
+                Background = (Brush)Application.Current.Resources["CardBackgroundFillColorSecondaryBrush"],
+                BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(14, 12, 14, 12),
+                Child = new TextBlock
+                {
+                    Text = "接下来会出现 Windows UAC 提示，仅用于配置启动服务。\n主程序仍以普通权限运行，此选项不会提升运行性能。",
+                    TextWrapping = TextWrapping.Wrap,
+                    FontSize = 12,
+                    LineHeight = 20,
+                    Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+                }
+            });
+
+            var dialog = new ContentDialog
+            {
+                Title = enable ? "启用高优先级启动" : "关闭高优先级启动",
+                Content = content,
+                PrimaryButtonText = "继续并授权",
+                CloseButtonText = "取消",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = this.Content!.XamlRoot
+            };
+            return await dialog.ShowAsync() == ContentDialogResult.Primary;
         }
 
-        private async void SetAutoStartTask(bool enable, bool highPriority = false)
+        private async Task ShowToastAsync(string message, bool isError = false)
         {
+            _toastCts?.Cancel();
+            _toastCts = new CancellationTokenSource();
+            var cancellationToken = _toastCts.Token;
+
+            ToastNotification.Severity = isError ? InfoBarSeverity.Error : InfoBarSeverity.Success;
+            ToastNotification.Message = message;
+            ToastNotification.IsOpen = true;
             try
             {
-                string taskName = "PoiTimeAutoStart";
-                string exePath = Environment.ProcessPath ?? "";
-
-                if (enable)
-                {
-                    int taskPriority = highPriority ? 0 : 7;
-                    string xmlContent = $@"<?xml version=""1.0"" encoding=""UTF-16""?>
-                    <Task version=""1.2"" xmlns=""http://schemas.microsoft.com/windows/2004/02/mit/task"">
-                      <Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>
-                      <Principals>
-                        <Principal id=""Author"">
-                          <RunLevel>HighestAvailable</RunLevel>
-                          <LogonType>InteractiveToken</LogonType>
-                        </Principal>
-                      </Principals>
-                      <Settings>
-                        <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-                        <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-                        <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-                        <AllowHardTerminate>true</AllowHardTerminate>
-                        <StartWhenAvailable>false</StartWhenAvailable>
-                        <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-                        <IdleSettings><StopOnIdleEnd>true</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>
-                        <AllowStartOnDemand>true</AllowStartOnDemand>
-                        <Enabled>true</Enabled>
-                        <Hidden>false</Hidden>
-                        <RunOnlyIfIdle>false</RunOnlyIfIdle>
-                        <WakeToRun>false</WakeToRun>
-                        <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-                        <Priority>{taskPriority}</Priority>
-                      </Settings>
-                      <Actions Context=""Author"">
-                        <Exec>
-                          <Command>""{exePath}""</Command>
-                          <Arguments>/autostart</Arguments>
-                        </Exec>
-                      </Actions>
-                    </Task>";
-
-                    string tempXmlPath = Path.Combine(Path.GetTempPath(), "PoiTimeTask.xml");
-                    File.WriteAllText(tempXmlPath, xmlContent);
-
-                    var process = Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "schtasks.exe",
-                        Arguments = $"/create /tn \"{taskName}\" /xml \"{tempXmlPath}\" /f",
-                        CreateNoWindow = true,
-                        UseShellExecute = false
-                    });
-                    process?.WaitForExit();
-                    File.Delete(tempXmlPath);
-                }
-                else
-                {
-                    var process = Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "schtasks.exe",
-                        Arguments = $"/delete /tn \"{taskName}\" /f",
-                        CreateNoWindow = true,
-                        UseShellExecute = false
-                    });
-                    process?.WaitForExit();
-                }
+                await Task.Delay(3200, cancellationToken);
+                ToastNotification.IsOpen = false;
             }
-            catch (Exception ex)
+            catch (OperationCanceledException)
             {
-                System.Diagnostics.Debug.WriteLine(ex.Message);
             }
         }
 
@@ -805,6 +808,47 @@ namespace PoiTime.WinUI
 
         // ================= 网络与下载逻辑 =================
 
+        private void ApplyAnnouncement(AnnouncementConfig? announcement)
+        {
+            AnnouncementTitleText.Text = string.IsNullOrWhiteSpace(announcement?.Title)
+                ? "欢迎来到 PoiTime!"
+                : announcement.Title.Trim();
+            AnnouncementContentText.Text = string.IsNullOrWhiteSpace(announcement?.Content)
+                ? "选择语音包、试听报时，剩下的交给后台。"
+                : announcement.Content.Trim();
+
+            var background = ColorHelper.FromArgb(255, 0x3F, 0x6F, 0x8F);
+            if (TryParseColor(announcement?.BackgroundColor, out var customBackground))
+            {
+                background = customBackground;
+            }
+
+            double luminance = (0.299 * background.R + 0.587 * background.G + 0.114 * background.B) / 255;
+            var foreground = luminance > 0.62 ? Colors.Black : Colors.White;
+            AnnouncementCard.Background = new SolidColorBrush(background);
+            AnnouncementTitleText.Foreground = new SolidColorBrush(foreground);
+            AnnouncementEyebrowText.Foreground = new SolidColorBrush(foreground) { Opacity = 0.85 };
+            AnnouncementContentText.Foreground = new SolidColorBrush(foreground) { Opacity = 0.85 };
+        }
+
+        private static bool TryParseColor(string? value, out Windows.UI.Color color)
+        {
+            color = default;
+            if (string.IsNullOrWhiteSpace(value)) return false;
+
+            string hex = value.Trim().TrimStart('#');
+            if (hex.Length == 6) hex = "FF" + hex;
+            if (hex.Length != 8 || !uint.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint packed))
+                return false;
+
+            color = ColorHelper.FromArgb(
+                (byte)(packed >> 24),
+                (byte)(packed >> 16),
+                (byte)(packed >> 8),
+                (byte)packed);
+            return true;
+        }
+
         private async void LoadUpdateJsonFromServer()
         {
             if (DownloadLoadingRing != null)
@@ -822,6 +866,7 @@ namespace PoiTime.WinUI
                 string jsonString = await _httpClient.GetStringAsync(updateJsonUrl);
 
                 var config = JsonSerializer.Deserialize<UpdateJsonConfig>(jsonString);
+                ApplyAnnouncement(config?.Announcement);
                 if (config?.VoicePacks != null)
                 {
                     _allVoicePacks.Clear();
@@ -954,7 +999,7 @@ namespace PoiTime.WinUI
                 }
                 else
                 {
-                    if (DownloadStatusTitle != null) DownloadStatusTitle.Text = $"正在下载 (还有 {_downloadQueue.Count} 个排队中...)";
+                    if (DownloadDetailText != null) DownloadDetailText.Text = $"已加入队列，等待下载的语音包：{_downloadQueue.Count} 个";
                 }
             }
         }
@@ -969,11 +1014,16 @@ namespace PoiTime.WinUI
                 var task = _downloadQueue.Dequeue();
                 var model = task.Model;
                 var btn = task.UIBtn;
+                string displayName = model.Name.Length > 12 ? model.Name.Substring(0, 11) + "..." : model.Name;
 
                 this.DispatcherQueue.TryEnqueue(() =>
                 {
                     btn.Content = "下载中...";
                     if (DownloadProgressBar != null) DownloadProgressBar.Value = 0;
+                    if (DownloadProgressText != null) DownloadProgressText.Text = "正在准备文件...";
+                    if (DownloadPercentText != null) DownloadPercentText.Text = "0%";
+                    if (DownloadStatusTitle != null) DownloadStatusTitle.Text = $"正在下载：{displayName}";
+                    if (DownloadDetailText != null) DownloadDetailText.Text = "正在连接下载服务器...";
                 });
 
                 var stopwatch = new System.Diagnostics.Stopwatch();
@@ -1015,6 +1065,10 @@ namespace PoiTime.WinUI
                     }
 
                     int totalTasks = filesToDownload.Count;
+                    this.DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (DownloadProgressText != null) DownloadProgressText.Text = $"0 / {totalTasks} 个文件";
+                    });
 
                     string? savedThreadsStr = GetSettingFromDisk(MaxThreadsSettingKey);
                     int maxThreads = int.TryParse(savedThreadsStr, out int t) ? t : DefaultMaxThreads;
@@ -1040,21 +1094,17 @@ namespace PoiTime.WinUI
 
                                     double percentage = ((double)completedTasks / totalTasks) * 100;
                                     if (DownloadProgressBar != null) DownloadProgressBar.Value = percentage;
+                                    if (DownloadProgressText != null) DownloadProgressText.Text = $"{completedTasks} / {totalTasks} 个文件";
+                                    if (DownloadPercentText != null) DownloadPercentText.Text = $"{percentage:F0}%";
 
-                                    string displayName = model.Name;
-                                    if (displayName.Length > 10)
-                                    {
-                                        displayName = displayName.Substring(0, 9) + "...";
-                                    }
-
-                                    string queueInfo = _downloadQueue.Count > 0 ? $" (等待中: {_downloadQueue.Count})" : "";
-                                    if (DownloadStatusTitle != null) DownloadStatusTitle.Text = $"正在下载: {displayName}{queueInfo} - {completedTasks}/{totalTasks}";
+                                    string queueInfo = _downloadQueue.Count > 0 ? $" · 队列 {_downloadQueue.Count} 个" : "";
+                                    if (DownloadStatusTitle != null) DownloadStatusTitle.Text = $"正在下载：{displayName}{queueInfo}";
 
                                     double elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
                                     if (elapsedSeconds > 0)
                                     {
                                         double bytesPerSecond = totalBytesDownloaded / elapsedSeconds;
-                                        if (DownloadDetailText != null) DownloadDetailText.Text = $"多线程并发速度: {FormatSpeed(bytesPerSecond)}";
+                                        if (DownloadDetailText != null) DownloadDetailText.Text = $"平均下载速度：{FormatSpeed(bytesPerSecond)}";
                                     }
                                 });
                             }
@@ -1099,10 +1149,7 @@ namespace PoiTime.WinUI
                         }
                         else
                         {
-                            if (ToastText != null) ToastText.Text = "管理员也无法写入该目录，请移动程序位置";
-                            if (ToastNotification != null) ToastNotification.Visibility = Visibility.Visible;
-                            await Task.Delay(3000);
-                            if (ToastNotification != null) ToastNotification.Visibility = Visibility.Collapsed;
+                            await ShowToastAsync("管理员也无法写入该目录，请将程序移到可写位置", true);
                         }
                     });
                     return;
@@ -1114,25 +1161,26 @@ namespace PoiTime.WinUI
                     {
                         btn.Content = "失败(重试)";
                         btn.IsEnabled = true;
+                        if (DownloadStatusTitle != null) DownloadStatusTitle.Text = $"下载失败：{displayName}";
+                        if (DownloadDetailText != null) DownloadDetailText.Text = "请检查网络连接，然后点击语音包上的重试按钮";
                     });
                     System.Diagnostics.Debug.WriteLine($"下载 {model.Name} 失败: {ex.Message}");
                 }
             }
 
-            this.DispatcherQueue.TryEnqueue(async () =>
-            {
-                _isDownloading = false;
-                if (DownloadStatusTitle != null) DownloadStatusTitle.Text = "所有队列下载完成";
-                if (DownloadDetailText != null) DownloadDetailText.Text = "所选语音包下载完成";
-                if (MiniProgressRing != null) MiniProgressRing.IsActive = false;
-                if (DownloadProgressBar != null) DownloadProgressBar.Value = 100;
+            _isDownloading = false;
+            if (DownloadStatusTitle != null) DownloadStatusTitle.Text = "所有队列下载完成";
+            if (DownloadProgressText != null) DownloadProgressText.Text = "全部文件处理完成";
+            if (DownloadPercentText != null) DownloadPercentText.Text = "100%";
+            if (DownloadDetailText != null) DownloadDetailText.Text = "所选语音包已安装，可以返回主页试听";
+            if (MiniProgressRing != null) MiniProgressRing.IsActive = false;
+            if (DownloadProgressBar != null) DownloadProgressBar.Value = 100;
 
-                await Task.Delay(3000);
-                if (!_isDownloading && FloatingProgressPanel != null)
-                {
-                    FloatingProgressPanel.Visibility = Visibility.Collapsed;
-                }
-            });
+            await Task.Delay(3000);
+            if (!_isDownloading && FloatingProgressPanel != null)
+            {
+                FloatingProgressPanel.Visibility = Visibility.Collapsed;
+            }
         }
 
         private async void DeleteVoiceBtn_Click(object sender, RoutedEventArgs e)
@@ -1303,6 +1351,21 @@ namespace PoiTime.WinUI
     {
         [JsonPropertyName("voice_packs")]
         public ObservableCollection<VoicePackModel> VoicePacks { get; set; } = new();
+
+        [JsonPropertyName("announcement")]
+        public AnnouncementConfig? Announcement { get; set; }
+    }
+
+    public class AnnouncementConfig
+    {
+        [JsonPropertyName("title")]
+        public string? Title { get; set; }
+
+        [JsonPropertyName("content")]
+        public string? Content { get; set; }
+
+        [JsonPropertyName("background_color")]
+        public string? BackgroundColor { get; set; }
     }
 
     public class VoicePackModel : INotifyPropertyChanged

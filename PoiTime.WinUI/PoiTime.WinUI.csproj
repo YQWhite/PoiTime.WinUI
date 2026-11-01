@@ -646,4 +646,18 @@
     <AppxBundle>Never</AppxBundle>
     <HoursBetweenUpdateChecks>0</HoursBetweenUpdateChecks>
   </PropertyGroup>
+
+  <Target Name="BuildStartupService" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+    <MSBuild Projects="..\PoiTime.StartupService\PoiTime.StartupService.csproj"
+             Targets="Restore;Build"
+             Properties="Configuration=$(Configuration);Platform=AnyCPU;OutDir=$(OutDir)startup-service\"
+             RemoveProperties="RuntimeIdentifier;RuntimeIdentifiers;SelfContained;PublishProfile;PublishDir" />
+  </Target>
+
+  <Target Name="PublishStartupService" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != ''">
+    <MSBuild Projects="..\PoiTime.StartupService\PoiTime.StartupService.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);Platform=AnyCPU;RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishSingleFile=true;PublishTrimmed=false;PublishReadyToRun=false;PublishDir=$(PublishDir)startup-service\"
+             RemoveProperties="PublishProfile;WindowsAppSDKSelfContained" />
+  </Target>
 </Project>

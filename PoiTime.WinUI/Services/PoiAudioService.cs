@@ -1,4 +1,7 @@
-﻿using System;
+using PoiTime.WinUI.Models;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -6,154 +9,162 @@ using System.Threading;
 using System.Threading.Tasks;
 using Windows.Media.Core;
 using Windows.Media.Playback;
-using PoiTime.WinUI.Models;
-using System.Collections.Generic;
 
-namespace PoiTime.WinUI.Services
+namespace PoiTime.WinUI.Services;
+
+public class PoiAudioService
 {
-    public class PoiAudioService
+    private readonly MediaPlayer _mediaPlayer = new();
+    private readonly string _basePath = Path.Combine(AppContext.BaseDirectory, "voices");
+    private PeriodicTimer? _timer;
+    private CancellationTokenSource? _cts;
+    private DateTime? _lastChimeSlot;
+
+    public VoiceConfig? CurrentConfig { get; private set; }
+    public string CurrentShipId { get; private set; } = "144";
+    public event EventHandler? VoiceFinished;
+    public bool IsPlaying => _mediaPlayer.PlaybackSession.PlaybackState == MediaPlaybackState.Playing;
+
+    public PoiAudioService()
     {
-        private MediaPlayer _mediaPlayer;
-        private PeriodicTimer? _timer;
-        private CancellationTokenSource? _cts;
+        _mediaPlayer.MediaEnded += (_, _) => VoiceFinished?.Invoke(this, EventArgs.Empty);
+        _mediaPlayer.MediaFailed += (_, _) => VoiceFinished?.Invoke(this, EventArgs.Empty);
+    }
 
-        public VoiceConfig? CurrentConfig { get; private set; }
-        public string CurrentShipId { get; private set; } = "144";
+    public void StopVoice()
+    {
+        _mediaPlayer.Pause();
+        _mediaPlayer.Position = TimeSpan.Zero;
+        VoiceFinished?.Invoke(this, EventArgs.Empty);
+    }
 
-        private string _basePath;
-        // ======== 新增：播放结束事件与播放状态 ========
-        public event EventHandler? VoiceFinished;
-        public bool IsPlaying => _mediaPlayer.PlaybackSession.PlaybackState == MediaPlaybackState.Playing;
+    public void LoadConfig(string shipId)
+    {
+        CurrentShipId = shipId;
+        CurrentConfig = null;
+        if (string.IsNullOrWhiteSpace(shipId))
+            return;
 
-        public PoiAudioService()
+        string configPath = Path.Combine(_basePath, shipId, "config.json");
+        if (!File.Exists(configPath))
+            return;
+
+        try
         {
-            _mediaPlayer = new MediaPlayer();
-            _mediaPlayer.MediaEnded += (s, e) => VoiceFinished?.Invoke(this, EventArgs.Empty);
-            _mediaPlayer.MediaFailed += (s, e) => VoiceFinished?.Invoke(this, EventArgs.Empty);
-            // 获取程序运行时的根目录
-            _basePath = Path.Combine(AppContext.BaseDirectory, "voices");
+            CurrentConfig = JsonSerializer.Deserialize<VoiceConfig>(File.ReadAllText(configPath));
         }
-        // ======== 新增：停止播放的方法 ========
-        public void StopVoice()
+        catch (Exception ex)
         {
-            _mediaPlayer.Pause();
-            _mediaPlayer.Position = TimeSpan.Zero;
-            VoiceFinished?.Invoke(this, EventArgs.Empty); // 手动触发结束事件以重置 UI
+            Debug.WriteLine($"读取语音配置失败: {ex.Message}");
         }
+    }
 
-        public void LoadConfig(string shipId)
-        {
-            CurrentShipId = shipId;
-            string configPath = Path.Combine(_basePath, shipId, "config.json");
-
-            if (File.Exists(configPath))
-            {
-                string json = File.ReadAllText(configPath);
-                CurrentConfig = JsonSerializer.Deserialize<VoiceConfig>(json);
-            }
-            else
-            {
-                CurrentConfig = null;
-            }
-        }
-
-        public List<(string ShipId, string Name)> GetAvailableShips()
-        {
-            var result = new List<(string, string)>();
-
-            // 如果没有 voices 文件夹，直接返回空列表
-            if (!Directory.Exists(_basePath)) return result;
-
-            // 遍历 voices 文件夹下的所有子文件夹
-            string[] directories = Directory.GetDirectories(_basePath);
-            foreach (string dir in directories)
-            {
-                string shipId = Path.GetFileName(dir); // 文件夹名，比如 "007a", "144"
-                string configPath = Path.Combine(dir, "config.json");
-
-                if (File.Exists(configPath))
-                {
-                    try
-                    {
-                        // 读取并解析 config.json
-                        string json = File.ReadAllText(configPath);
-                        var config = JsonSerializer.Deserialize<VoiceConfig>(json);
-
-                        // 提取舰娘名字，如果没有则显示“未知舰娘”
-                        string name = config?.name ?? "未知舰娘";
-                        result.Add((shipId, name));
-                    }
-                    catch
-                    {
-                        // 如果某个配置解析出错（比如 JSON 格式不对），直接跳过它，防止程序崩溃
-                    }
-                }
-            }
+    public List<(string ShipId, string Name)> GetAvailableShips()
+    {
+        var result = new List<(string, string)>();
+        if (!Directory.Exists(_basePath))
             return result;
-        }
 
-        public void PlayVoice(string? fileName)
+        foreach (string dir in Directory.GetDirectories(_basePath))
         {
-            if (string.IsNullOrEmpty(fileName)) return;
-
-            string filePath = Path.Combine(_basePath, CurrentShipId, fileName);
-            if (File.Exists(filePath))
-            {
-                _mediaPlayer.Source = MediaSource.CreateFromUri(new Uri(filePath));
-                _mediaPlayer.Play();
-            }
-        }
-
-        public void TestCurrentHourVoice()
-        {
-            PlayHourlyVoice(DateTime.Now.Hour);
-        }
-
-        public void StartTimer()
-        {
-            if (_cts != null) return;
-
-            _cts = new CancellationTokenSource();
-            _timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-            _ = RunLoopAsync();
-        }
-
-        public void StopTimer()
-        {
-            _cts?.Cancel();
-            _cts = null;
-            _timer?.Dispose();
-            _timer = null;
-        }
-
-        private async Task RunLoopAsync()
-        {
-            if (_timer == null || _cts == null) return;
+            string shipId = Path.GetFileName(dir);
+            string configPath = Path.Combine(dir, "config.json");
+            if (!File.Exists(configPath))
+                continue;
 
             try
             {
-                while (await _timer.WaitForNextTickAsync(_cts.Token))
+                var config = JsonSerializer.Deserialize<VoiceConfig>(File.ReadAllText(configPath));
+                result.Add((shipId, config?.name ?? "未知舰娘"));
+            }
+            catch
+            {
+            }
+        }
+        return result;
+    }
+
+    public void PlayVoice(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) || string.IsNullOrWhiteSpace(CurrentShipId))
+            return;
+
+        string filePath = Path.Combine(_basePath, CurrentShipId, fileName);
+        if (!File.Exists(filePath))
+            return;
+
+        try
+        {
+            _mediaPlayer.Source = MediaSource.CreateFromUri(new Uri(filePath));
+            _mediaPlayer.Play();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"播放语音失败: {ex.Message}");
+        }
+    }
+
+    public void TestCurrentHourVoice()
+    {
+        PlayHourlyVoice(DateTime.Now.Hour);
+    }
+
+    public void StartTimer()
+    {
+        if (_cts is not null)
+            return;
+
+        _cts = new CancellationTokenSource();
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        _ = RunLoopAsync(_timer, _cts.Token);
+    }
+
+    public void StopTimer()
+    {
+        _cts?.Cancel();
+        _cts = null;
+        _timer?.Dispose();
+        _timer = null;
+    }
+
+    private async Task RunLoopAsync(PeriodicTimer timer, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                try
                 {
                     DateTime now = DateTime.Now;
-                    // 检测是否是整点 00分00秒
-                    if (now.Minute == 0 && now.Second == 0)
-                    {
-                        PlayHourlyVoice(now.Hour);
-                    }
+                    if (now.Minute != 0)
+                        continue;
+
+                    DateTime chimeSlot = now.Date.AddHours(now.Hour);
+                    if (_lastChimeSlot == chimeSlot)
+                        continue;
+
+                    _lastChimeSlot = chimeSlot;
+                    LoadConfig(CurrentShipId);
+                    PlayHourlyVoice(now.Hour);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"整点报时失败: {ex.Message}");
                 }
             }
-            catch (OperationCanceledException) { }
         }
-
-        private void PlayHourlyVoice(int hour)
+        catch (OperationCanceledException)
         {
-            if (CurrentConfig?.voices == null) return;
-
-            var voice = CurrentConfig.voices.FirstOrDefault(v => v.hour == hour && v.minute == 0);
-            if (voice != null)
-            {
-                PlayVoice(voice.fileName);
-            }
         }
+    }
+
+    private void PlayHourlyVoice(int hour)
+    {
+        if (CurrentConfig?.voices is null)
+            return;
+
+        var voice = CurrentConfig.voices.FirstOrDefault(v => v.hour == hour && v.minute == 0);
+        if (voice is not null)
+            PlayVoice(voice.fileName);
     }
 }
