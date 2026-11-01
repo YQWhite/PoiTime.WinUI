@@ -69,6 +69,14 @@ namespace PoiTime.WinUI
         private const string LegacyDefaultUpdateJsonUrl = "https://cs.thorgan.icu/update.json";
         private const string UpdateJsonUrlSettingKey = "CustomUpdateJsonUrl";
         private const string MaxThreadsSettingKey = "MaxDownloadThreads";
+        private const string HideOnAutoStartSettingKey = "HideWindowOnAutoStart";
+
+        /// <summary>
+        /// True when launched by autostart and the user chose to keep the window hidden.
+        /// App.OnLaunched still has to Activate the window (so XAML and the tray icon load),
+        /// then calls HideToTray.
+        /// </summary>
+        public bool StartHidden { get; private set; }
         private const int DefaultMaxThreads = 5;
         private static readonly string SettingsFilePath = Path.Combine(AppContext.BaseDirectory, "app_settings.json");
 
@@ -129,10 +137,12 @@ namespace PoiTime.WinUI
                 }
                 _appWindow.Closing += AppWindow_Closing;
 
-                // 如果带有自启参数，直接把窗口隐藏，只留右下角托盘
-                if (isAutoStart)
+                // 自启且开启了「自启时隐藏窗口」时，先把窗口移到屏幕外，避免 Activate 时闪一下；
+                // App.OnLaunched 激活后会调用 HideToTray 真正隐藏到托盘。
+                StartHidden = isAutoStart && GetSettingFromDisk(HideOnAutoStartSettingKey) == "true";
+                if (StartHidden)
                 {
-                    _appWindow.Hide();
+                    _appWindow.Move(new PointInt32(-32000, -32000));
                 }
             }
 
@@ -521,6 +531,29 @@ namespace PoiTime.WinUI
             _appWindow?.Hide();
         }
 
+        public void HideToTray()
+        {
+            if (_appWindow is null) return;
+            _appWindow.Hide();
+            CenterWindowOnScreen();
+        }
+
+        private void CenterWindowOnScreen()
+        {
+            if (_appWindow is null) return;
+            try
+            {
+                var area = DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary).WorkArea;
+                int x = area.X + Math.Max(0, (area.Width - _appWindow.Size.Width) / 2);
+                int y = area.Y + Math.Max(0, (area.Height - _appWindow.Size.Height) / 2);
+                _appWindow.Move(new PointInt32(x, y));
+            }
+            catch (Exception exception)
+            {
+                StartupDiagnostics.Write("Unable to center window", exception);
+            }
+        }
+
         private void RestoreMainWindow()
         {
             _appWindow?.Show();
@@ -640,6 +673,19 @@ namespace PoiTime.WinUI
             HighPriorityContainer.Visibility = mode == AutoStartMode.Disabled ? Visibility.Collapsed : Visibility.Visible;
             AutoStartToggle.IsEnabled = mode != AutoStartMode.HighPriority;
             HighPriorityToggle.IsEnabled = mode != AutoStartMode.Disabled;
+
+            // 「自启时隐藏窗口」只在开启开机自启后显示；关闭自启时一并关闭并隐藏
+            HideOnAutoStartContainer.Visibility = mode == AutoStartMode.Disabled ? Visibility.Collapsed : Visibility.Visible;
+            if (mode == AutoStartMode.Disabled)
+            {
+                if (GetSettingFromDisk(HideOnAutoStartSettingKey) == "true")
+                    SaveSettingToDisk(HideOnAutoStartSettingKey, "false");
+                HideOnAutoStartToggle.IsOn = false;
+            }
+            else
+            {
+                HideOnAutoStartToggle.IsOn = GetSettingFromDisk(HideOnAutoStartSettingKey) == "true";
+            }
             _isInitializing = false;
         }
 
@@ -660,6 +706,15 @@ namespace PoiTime.WinUI
                 UpdateAutoStartControls(AutoStartManager.GetCurrentMode());
                 await ShowToastAsync("启动设置保存失败，请检查系统权限", true);
             }
+        }
+
+        private async void HideOnAutoStartToggle_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+
+            bool enable = HideOnAutoStartToggle.IsOn;
+            SaveSettingToDisk(HideOnAutoStartSettingKey, enable ? "true" : "false");
+            await ShowToastAsync(enable ? "开机自启后将隐藏窗口，只在托盘运行" : "开机自启后将显示主窗口");
         }
 
         private async void HighPriorityToggle_Toggled(object sender, RoutedEventArgs e)

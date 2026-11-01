@@ -475,6 +475,35 @@
                                                           Toggled="HighPriorityToggle_Toggled" />
                                         </Grid>
                                     </Grid>
+
+                                    <Grid x:Name="HideOnAutoStartContainer" Visibility="Collapsed" Margin="0,20,0,0">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Border Grid.Row="0" Height="1" Margin="0,0,0,20"
+                                                Background="{ThemeResource CardStrokeColorDefaultBrush}" />
+                                        <Grid Grid.Row="1">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="5" Margin="0,0,24,0">
+                                                <TextBlock Text="自启时隐藏窗口" FontSize="14" FontWeight="SemiBold" />
+                                                <TextBlock Text="开机自动启动后不显示主窗口，只在托盘运行，双击托盘图标可打开。"
+                                                           Style="{StaticResource PageDescriptionTextStyle}" />
+                                            </StackPanel>
+                                            <ToggleSwitch x:Name="HideOnAutoStartToggle"
+                                                          Grid.Column="1"
+                                                          VerticalAlignment="Center"
+                                                          HorizontalAlignment="Right"
+                                                          MinWidth="0"
+                                                          Margin="0"
+                                                          OnContent="{x:Null}"
+                                                          OffContent="{x:Null}"
+                                                          Toggled="HideOnAutoStartToggle_Toggled" />
+                                        </Grid>
+                                    </Grid>
                                 </StackPanel>
                             </Border>
 

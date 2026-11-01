@@ -56,9 +56,18 @@ namespace PoiTime.WinUI
         {
             try
             {
-                _window = new MainWindow();
+                var mainWindow = new MainWindow();
+                _window = mainWindow;
                 _window.Activate();
-                StartupDiagnostics.Write("Main window activated");
+                if (mainWindow.StartHidden)
+                {
+                    mainWindow.HideToTray();
+                    StartupDiagnostics.Write("Main window activated and hidden to tray (autostart)");
+                }
+                else
+                {
+                    StartupDiagnostics.Write("Main window activated");
+                }
             }
             catch (Exception exception)
             {
