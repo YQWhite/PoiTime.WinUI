@@ -24,9 +24,28 @@ internal sealed partial class PoiTimeStartupService : ServiceBase
 
     protected override void OnStart(string[] args)
     {
-        uint sessionId = WTSGetActiveConsoleSessionId();
-        if (sessionId != uint.MaxValue)
-            TryLaunch((int)sessionId);
+        try
+        {
+            uint sessionId = WTSGetActiveConsoleSessionId();
+            if (sessionId != uint.MaxValue)
+                TryLaunch((int)sessionId);
+        }
+        catch (Exception ex)
+        {
+            // Keep the service running so it can still launch the app on the next SessionLogon event.
+            TryWriteEventLog($"Failed to launch PoiTime on service start: {ex}");
+        }
+    }
+
+    private void TryWriteEventLog(string message)
+    {
+        try
+        {
+            EventLog.WriteEntry(message, EventLogEntryType.Warning);
+        }
+        catch
+        {
+        }
     }
 
     protected override void OnSessionChange(SessionChangeDescription changeDescription)
@@ -55,10 +74,11 @@ internal sealed partial class PoiTimeStartupService : ServiceBase
 
             LaunchInSession(sessionId);
         }
-        catch
+        catch (Exception ex)
         {
             lock (_syncRoot)
                 _launchedSessions.Remove(sessionId);
+            TryWriteEventLog($"Failed to launch PoiTime in session {sessionId}: {ex}");
         }
     }
 
@@ -174,7 +194,8 @@ internal sealed partial class PoiTimeStartupService : ServiceBase
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool WTSQueryUserToken(int sessionId, out IntPtr token);
 
-    [DllImport("wtsapi32.dll")]
+    // WTSGetActiveConsoleSessionId is exported by kernel32.dll, not wtsapi32.dll.
+    [DllImport("kernel32.dll")]
     private static extern uint WTSGetActiveConsoleSessionId();
 
     [DllImport("advapi32.dll", SetLastError = true)]
