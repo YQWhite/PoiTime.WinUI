@@ -380,8 +380,7 @@ namespace PoiTime.WinUI
                 }
 
                 int currentHour = DateTime.Now.Hour;
-                string fileName = $"{model.Id}-{currentHour:D2}00.mp3";
-                string voicePath = Path.Combine(AppContext.BaseDirectory, "voices", model.Id, fileName);
+                string voicePath = PoiAudioService.GetHourlyVoicePath(model.Id, currentHour);
 
                 if (!File.Exists(voicePath)) return;
 

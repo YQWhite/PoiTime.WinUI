@@ -59,6 +59,34 @@ public class PoiAudioService
         }
     }
 
+    /// <summary>
+    /// Resolves the hourly voice file for a voice pack from its config.json "voices" list,
+    /// falling back to the default "{shipId}-{HH}00.mp3" name when the config has no entry.
+    /// </summary>
+    public static string GetHourlyVoicePath(string shipId, int hour)
+    {
+        string packFolder = Path.Combine(AppContext.BaseDirectory, "voices", shipId);
+        string? fileName = null;
+        string configPath = Path.Combine(packFolder, "config.json");
+        if (File.Exists(configPath))
+        {
+            try
+            {
+                var config = JsonSerializer.Deserialize<VoiceConfig>(File.ReadAllText(configPath));
+                fileName = config?.voices?.FirstOrDefault(v => v.hour == hour && v.minute == 0)?.fileName;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"读取语音配置失败: {ex.Message}");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(fileName))
+            fileName = $"{shipId}-{hour:D2}00.mp3";
+
+        return Path.Combine(packFolder, fileName);
+    }
+
     public List<(string ShipId, string Name)> GetAvailableShips()
     {
         var result = new List<(string, string)>();
